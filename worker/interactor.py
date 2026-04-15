@@ -89,6 +89,15 @@ def main():
         if not move_dir:
             break
         claimed_score_str = read_line()
+        try:
+            claimed_score = int(claimed_score_str)
+        except ValueError:
+            sys.stderr.write(f"Invalid claimed score format: {claimed_score_str}\n")
+            break
+            
+        if claimed_score != score:
+            sys.stderr.write(f"Score mismatch at step {steps}. Actual: {score}, Claimed: {claimed_score}\n")
+            break
         
         move_dir = move_dir.upper()
         if move_dir not in ['W', 'A', 'S', 'D']:
@@ -143,9 +152,20 @@ def main():
     final_map = []
     for _ in range(20):
         final_map.append(read_line())
-    final_score = read_line()
-    
-    # We could strictly parse and check final map conformity but for now let's just log score
+        
+    final_score_str = read_line()
+    try:
+        final_score = int(final_score_str)
+        if final_score != score:
+            sys.stderr.write(f"Final score mismatch. Actual: {score}, Claimed: {final_score}\n")
+            proc.kill()
+            sys.exit(1)
+    except ValueError:
+        sys.stderr.write(f"Invalid final score format: {final_score_str}\n")
+        proc.kill()
+        sys.exit(1)
+        
+    # Validation successful
     print(json.dumps({"raw_score": score}))
     
     proc.kill()

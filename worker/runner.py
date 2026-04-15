@@ -141,10 +141,16 @@ def judge_submission(submission_id: int) -> None:
         container.put_archive("/workspace", interactor_tar_bytes)
 
         total_weighted_raw_score = 0.0
+        import random
+        import json
+        import math
+        
+        test_reports = []
 
-        for case in PROBLEM["tests"]:
+        for idx, case in enumerate(PROBLEM["tests"], 1):
             n = case["n"]
-            seed = case["seed"]
+            # Dynamic seed generation
+            seed = random.randint(10000, 99999)
 
             start = time.perf_counter()
             run_result = container.exec_run(
@@ -160,46 +166,53 @@ def judge_submission(submission_id: int) -> None:
             run_stderr = (stderr or b"").decode("utf-8", errors="replace")
 
             if run_exit_code == 124:
+                msg = f"Test N={n} (Seed: {seed}) exceeded time limit"
+                test_reports.append(json.dumps({"N": n, "Seed": seed, "Status": "TLE", "RawScore": 0, "Weighted": 0.0, "Error": msg}))
                 with SessionLocal() as session:
                     update_submission(
                         session,
                         submission_id,
                         status="finished",
                         verdict="Time Limit Exceeded",
-                        detail=f"Test N={n} exceeded time limit",
+                        detail="\n".join(test_reports),
                         program_output=run_stdout[-8000:],
                         time_ms=elapsed_ms,
                     )
                 return
 
             if run_exit_code != 0:
+                err_msg = run_stderr.strip()
+                msg = f"Test N={n} (Seed: {seed}) crashed or validation failed: {err_msg}"
+                test_reports.append(json.dumps({"N": n, "Seed": seed, "Status": "RE/WA", "RawScore": 0, "Weighted": 0.0, "Error": err_msg}))
                 with SessionLocal() as session:
                     update_submission(
                         session,
                         submission_id,
                         status="finished",
-                        verdict="Runtime Error",
-                        detail=f"Test N={n} crashed or had invalid interaction:\n{run_stderr[-8000:]}",
+                        verdict="Runtime Error/Wrong Answer",
+                        detail="\n".join(test_reports),
                         program_output=run_stdout[-8000:],
                         time_ms=elapsed_ms,
                     )
                 return
 
-            import json
-            import math
             try:
                 out_data = json.loads(run_stdout.strip().split("\n")[-1])
                 raw_score = out_data["raw_score"]
                 weight = 1.0 / (math.log2(n) + 1)
-                total_weighted_raw_score += raw_score * weight
+                weighted_score = raw_score * weight
+                total_weighted_raw_score += weighted_score
+                test_reports.append(json.dumps({"N": n, "Seed": seed, "Status": "OK", "RawScore": raw_score, "Weighted": round(weighted_score, 2)}))
             except Exception as e:
+                msg = f"Test N={n} faled to parse interactor output"
+                test_reports.append(json.dumps({"N": n, "Seed": seed, "Status": "SysErr", "RawScore": 0, "Weighted": 0.0, "Error": msg}))
                 with SessionLocal() as session:
                     update_submission(
                         session,
                         submission_id,
                         status="finished",
                         verdict="System Error",
-                        detail=f"Test N={n} failed to parse interactor output",
+                        detail="\n".join(test_reports),
                         program_output=run_stdout[-8000:],
                         time_ms=elapsed_ms,
                     )
@@ -219,12 +232,13 @@ def judge_submission(submission_id: int) -> None:
             base_score = 30
             
         with SessionLocal() as session:
+            final_report_str = "\n".join(test_reports) + f"\n\nTotal Weighted Score: {total_weighted_raw_score:.2f} / Base Score: {base_score}"
             update_submission(
                 session,
                 submission_id,
                 status="finished",
                 verdict="Accepted",
-                detail=f"Total Weighted Score: {total_weighted_raw_score:.2f} / Base Score: {base_score}",
+                detail=final_report_str,
                 score=base_score,
                 time_ms=elapsed_ms,
             )
