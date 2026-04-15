@@ -31,8 +31,8 @@ def submit_code(username: str, source_code: str, language: str) -> dict:
     return response.json()
 
 
-st.set_page_config(page_title="Single Problem Judge", layout="wide")
-st.title("Single Problem Judge")
+st.set_page_config(page_title="单题判题系统", layout="wide")
+st.title("单题判题系统")
 
 problem = fetch_problem()
 
@@ -41,67 +41,67 @@ left, right = st.columns([3, 2])
 with left:
     st.subheader(problem["title"])
     st.write(problem["statement"])
-    st.markdown(f"**Input**: {problem['input_format']}")
-    st.markdown(f"**Output**: {problem['output_format']}")
-    st.markdown(f"**Time Limit**: {problem['time_limit_ms']} ms")
-    st.markdown(f"**Memory Limit**: {problem['memory_limit_mb']} MB")
+    st.markdown(f"**输入格式**: {problem['input_format']}")
+    st.markdown(f"**输出格式**: {problem['output_format']}")
+    st.markdown(f"**时间限制**: {problem['time_limit_ms']} ms")
+    st.markdown(f"**内存限制**: {problem['memory_limit_mb']} MB")
     st.code(problem["sample_input"], language="text")
     st.code(problem["sample_output"], language="text")
 
 with right:
-    username = st.text_input("Username", value="guest")
+    username = st.text_input("用户名", value="guest")
     supported_languages = [
         code for code in problem["supported_languages"] if code in LANGUAGES
     ]
     language = st.selectbox(
-        "Language",
+        "编程语言",
         supported_languages,
         format_func=lambda code: LANGUAGES[code]["label"],
     )
     source_code = st.text_area(
-        f"{LANGUAGES[language]['label']} Code",
+        f"{LANGUAGES[language]['label']} 代码",
         value=LANGUAGES[language]["default_code"],
         height=420,
     )
-    if st.button("Submit", type="primary"):
+    if st.button("提交代码", type="primary"):
         result = submit_code(username, source_code, language)
-        st.success(f"Submitted as #{result['id']}")
+        st.success(f"提交成功，ID: #{result['id']}")
 
 st.divider()
 col1, col2 = st.columns([1, 4])
 with col1:
-    if st.button("Refresh Results"):
+    if st.button("刷新结果"):
         st.rerun()
-    auto_refresh = st.checkbox("Auto refresh", value=True)
+    auto_refresh = st.checkbox("自动刷新", value=True)
 with col2:
-    st.caption("Latest 50 submissions")
+    st.caption("最近 50 次提交")
 
 submissions = fetch_submissions()
 st.dataframe(
     [
         {
-            "id": item["id"],
-            "user": item["username"],
-            "language": item["language"],
-            "status": item["status"],
-            "verdict": item["verdict"],
-            "time_ms": item["time_ms"],
-            "created_at": item["created_at"],
-            "detail": item["detail"],
+            "ID": item["id"],
+            "用户": item["username"],
+            "语言": item["language"],
+            "状态": item["status"],
+            "运行结果": item["verdict"],
+            "耗时(ms)": item["time_ms"],
+            "提交时间": item["created_at"],
+            "详情": item["detail"],
         }
         for item in submissions
     ],
     use_container_width=True,
 )
 
-selected_id = st.number_input("Inspect submission id", min_value=1, step=1, value=1)
-if st.button("Load Submission"):
+selected_id = st.number_input("查看提交 ID", min_value=1, step=1, value=1)
+if st.button("加载提交详情"):
     response = requests.get(f"{API_BASE_URL}/submissions/{selected_id}", timeout=5)
     if response.ok:
         item = response.json()
         st.write(item)
     else:
-        st.error("Submission not found")
+        st.error("未找到该提交")
 
 if auto_refresh:
     time.sleep(5)
