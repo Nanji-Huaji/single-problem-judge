@@ -146,6 +146,7 @@ def judge_submission(submission_id: int) -> None:
         import math
         
         test_reports = []
+        worst_verdict = "Accepted"
 
         for idx, case in enumerate(PROBLEM["tests"], 1):
             n = case["n"]
@@ -168,33 +169,17 @@ def judge_submission(submission_id: int) -> None:
             if run_exit_code == 124:
                 msg = f"Test N={n} (Seed: {seed}) exceeded time limit"
                 test_reports.append(json.dumps({"N": n, "Seed": seed, "Status": "TLE", "RawScore": 0, "Weighted": 0.0, "Error": msg}))
-                with SessionLocal() as session:
-                    update_submission(
-                        session,
-                        submission_id,
-                        status="finished",
-                        verdict="Time Limit Exceeded",
-                        detail="\n".join(test_reports),
-                        program_output=run_stdout[-8000:],
-                        time_ms=elapsed_ms,
-                    )
-                return
+                if worst_verdict == "Accepted":
+                    worst_verdict = "Time Limit Exceeded"
+                continue
 
             if run_exit_code != 0:
                 err_msg = run_stderr.strip()
                 msg = f"Test N={n} (Seed: {seed}) crashed or validation failed: {err_msg}"
                 test_reports.append(json.dumps({"N": n, "Seed": seed, "Status": "RE/WA", "RawScore": 0, "Weighted": 0.0, "Error": err_msg}))
-                with SessionLocal() as session:
-                    update_submission(
-                        session,
-                        submission_id,
-                        status="finished",
-                        verdict="Runtime Error/Wrong Answer",
-                        detail="\n".join(test_reports),
-                        program_output=run_stdout[-8000:],
-                        time_ms=elapsed_ms,
-                    )
-                return
+                if worst_verdict == "Accepted":
+                    worst_verdict = "Runtime Error/Wrong Answer"
+                continue
 
             try:
                 out_data = json.loads(run_stdout.strip().split("\n")[-1])
@@ -206,17 +191,9 @@ def judge_submission(submission_id: int) -> None:
             except Exception as e:
                 msg = f"Test N={n} faled to parse interactor output"
                 test_reports.append(json.dumps({"N": n, "Seed": seed, "Status": "SysErr", "RawScore": 0, "Weighted": 0.0, "Error": msg}))
-                with SessionLocal() as session:
-                    update_submission(
-                        session,
-                        submission_id,
-                        status="finished",
-                        verdict="System Error",
-                        detail="\n".join(test_reports),
-                        program_output=run_stdout[-8000:],
-                        time_ms=elapsed_ms,
-                    )
-                return
+                if worst_verdict == "Accepted":
+                    worst_verdict = "System Error"
+                continue
 
         # Calculate final base score based on total_weighted_raw_score
         base_score = 0
@@ -237,7 +214,7 @@ def judge_submission(submission_id: int) -> None:
                 session,
                 submission_id,
                 status="finished",
-                verdict="Accepted",
+                verdict=worst_verdict,
                 detail=final_report_str,
                 score=base_score,
                 time_ms=elapsed_ms,
