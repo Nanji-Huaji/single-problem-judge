@@ -21,6 +21,7 @@ class SubmissionRead(BaseModel):
     expected_output: str | None
     time_ms: int | None
     memory_kb: int | None
+    score: int | None = None
     created_at: datetime
     updated_at: datetime
 

@@ -136,13 +136,19 @@ def judge_submission(submission_id: int) -> None:
                 )
             return
 
+        interactor_code = Path(__file__).parent.joinpath("interactor.py").read_text()
+        interactor_tar_bytes = create_tar_with_file("interactor.py", interactor_code)
+        container.put_archive("/workspace", interactor_tar_bytes)
+
+        total_weighted_raw_score = 0.0
+
         for case in PROBLEM["tests"]:
-            input_tar_bytes = create_tar_with_file("input.txt", case["input"])
-            container.put_archive("/workspace", input_tar_bytes)
+            n = case["n"]
+            seed = case["seed"]
 
             start = time.perf_counter()
             run_result = container.exec_run(
-                ["bash", "-lc", f"timeout 2s {language_config['run']} < /workspace/input.txt"],
+                ["bash", "-lc", f"timeout 5s python3 /workspace/interactor.py {n} {seed} '{language_config['run']}'"],
                 workdir="/workspace",
                 demux=True,
             )
@@ -160,9 +166,8 @@ def judge_submission(submission_id: int) -> None:
                         submission_id,
                         status="finished",
                         verdict="Time Limit Exceeded",
-                        detail="Program exceeded 2 seconds",
+                        detail=f"Test N={n} exceeded time limit",
                         program_output=run_stdout[-8000:],
-                        expected_output=case["output"],
                         time_ms=elapsed_ms,
                     )
                 return
@@ -174,29 +179,57 @@ def judge_submission(submission_id: int) -> None:
                         submission_id,
                         status="finished",
                         verdict="Runtime Error",
-                        detail=(
-                            run_stderr or "Program exited with non-zero status"
-                        )[-8000:],
+                        detail=f"Test N={n} crashed or had invalid interaction:\n{run_stderr[-8000:]}",
                         program_output=run_stdout[-8000:],
-                        expected_output=case["output"],
                         time_ms=elapsed_ms,
                     )
                 return
 
-            if run_stdout != case["output"]:
+            import json
+            import math
+            try:
+                out_data = json.loads(run_stdout.strip().split("\n")[-1])
+                raw_score = out_data["raw_score"]
+                weight = 1.0 / (math.log2(n) + 1)
+                total_weighted_raw_score += raw_score * weight
+            except Exception as e:
                 with SessionLocal() as session:
                     update_submission(
                         session,
                         submission_id,
                         status="finished",
-                        verdict="Wrong Answer",
-                        detail="Output does not match expected output",
+                        verdict="System Error",
+                        detail=f"Test N={n} failed to parse interactor output",
                         program_output=run_stdout[-8000:],
-                        expected_output=case["output"],
                         time_ms=elapsed_ms,
                     )
                 return
 
+        # Calculate final base score based on total_weighted_raw_score
+        base_score = 0
+        if total_weighted_raw_score >= 500:
+            base_score = 50
+        elif total_weighted_raw_score >= 400:
+            base_score = 45
+        elif total_weighted_raw_score >= 300:
+            base_score = 40
+        elif total_weighted_raw_score >= 200:
+            base_score = 35
+        elif total_weighted_raw_score >= 100:
+            base_score = 30
+            
+        with SessionLocal() as session:
+            update_submission(
+                session,
+                submission_id,
+                status="finished",
+                verdict="Accepted",
+                detail=f"Total Weighted Score: {total_weighted_raw_score:.2f} / Base Score: {base_score}",
+                score=base_score,
+                time_ms=elapsed_ms,
+            )
+
+    except Exception as e:
         with SessionLocal() as session:
             update_submission(
                 session,
