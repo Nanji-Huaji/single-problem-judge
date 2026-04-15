@@ -3,8 +3,6 @@ import time
 
 import requests
 import streamlit as st
-from streamlit_ace import st_ace
-from streamlit_javascript import st_javascript
 
 from app.languages import LANGUAGES
 
@@ -61,20 +59,10 @@ with right:
         format_func=lambda code: LANGUAGES[code]["label"],
     )
     
-    st.write(f"**请输入 {LANGUAGES[language]['label']} 代码:**")
-    
-    # Use javascript to detect Streamlit theme mode
-    is_dark_mode = st_javascript('window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches')
-    ace_theme = "monokai" if is_dark_mode else "chrome"
-
-    source_code = st_ace(
+    source_code = st.text_area(
+        f"{LANGUAGES[language]['label']} 代码",
         value=LANGUAGES[language]["default_code"],
-        language=LANGUAGES[language]["editor_language"],
-        theme=ace_theme,
         height=420,
-        font_size=14,
-        key=f"editor_{language}",
-        auto_update=True
     )
     
     if st.button("提交代码", type="primary"):
