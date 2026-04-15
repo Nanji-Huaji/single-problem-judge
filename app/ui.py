@@ -3,6 +3,7 @@ import time
 
 import requests
 import streamlit as st
+from streamlit_ace import st_ace
 
 from app.languages import LANGUAGES
 
@@ -58,11 +59,18 @@ with right:
         supported_languages,
         format_func=lambda code: LANGUAGES[code]["label"],
     )
-    source_code = st.text_area(
-        f"{LANGUAGES[language]['label']} 代码",
+    
+    st.write(f"**请输入 {LANGUAGES[language]['label']} 代码:**")
+    source_code = st_ace(
         value=LANGUAGES[language]["default_code"],
+        language=LANGUAGES[language]["editor_language"],
+        theme="monokai",
         height=420,
+        font_size=14,
+        key=f"editor_{language}",
+        auto_update=True
     )
+    
     if st.button("提交代码", type="primary"):
         result = submit_code(username, source_code, language)
         st.success(f"提交成功，ID: #{result['id']}")
