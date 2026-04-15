@@ -1,16 +1,19 @@
 import json
 import os
-import subprocess
-import tempfile
+import tarfile
+import io
 import time
 from pathlib import Path
 
+import docker
+import docker.errors
 from redis import Redis
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.languages import LANGUAGES
 
+docker_client = docker.from_env()
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:////data/judge.db")
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
@@ -29,19 +32,21 @@ redis_client = Redis.from_url(REDIS_URL, decode_responses=True)
 
 
 def ensure_image() -> None:
-    result = subprocess.run(
-        ["docker", "image", "inspect", SANDBOX_IMAGE],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        check=False,
-    )
-    if result.returncode == 0:
-        return
-    subprocess.run(
-        ["docker", "build", "-t", SANDBOX_IMAGE, "/sandbox-src"],
-        check=True,
-    )
+    try:
+        docker_client.images.get(SANDBOX_IMAGE)
+    except docker.errors.ImageNotFound:
+        docker_client.images.build(path="/sandbox-src", tag=SANDBOX_IMAGE, rm=True)
 
+
+def create_tar_with_file(filename: str, file_content: str) -> bytes:
+    tar_stream = io.BytesIO()
+    with tarfile.open(fileobj=tar_stream, mode='w') as tar:
+        encoded_content = file_content.encode('utf-8')
+        tarinfo = tarfile.TarInfo(name=filename)
+        tarinfo.size = len(encoded_content)
+        tarinfo.mtime = int(time.time())
+        tar.addfile(tarinfo, io.BytesIO(encoded_content))
+    return tar_stream.getvalue()
 
 def load_submission(session, submission_id: int):
     from app.models import Submission
@@ -95,30 +100,31 @@ def judge_submission(submission_id: int) -> None:
 
     ensure_image()
 
-    with tempfile.TemporaryDirectory(prefix=f"judge-{submission_id}-") as temp_dir:
-        temp_path = Path(temp_dir)
-        source_path = temp_path / language_config["source_name"]
-        source_path.write_text(source_code, encoding="utf-8")
+    container = docker_client.containers.run(
+        SANDBOX_IMAGE,
+        command=["sleep", "infinity"],
+        detach=True,
+        network_mode="none",
+        nano_cpus=1000000000,
+        mem_limit="256m",
+        pids_limit=64,
+    )
+    try:
+        source_name = language_config["source_name"]
+        tar_bytes = create_tar_with_file(source_name, source_code)
+        container.put_archive("/workspace", tar_bytes)
 
-        compile_cmd = [
-            "docker",
-            "run",
-            "--rm",
-            "--network",
-            "none",
-            "--cpus",
-            "1",
-            "--memory",
-            "256m",
-            "-v",
-            f"{temp_dir}:/workspace",
-            SANDBOX_IMAGE,
-            "bash",
-            "-lc",
-            language_config["compile"],
-        ]
-        compile_proc = subprocess.run(compile_cmd, capture_output=True, text=True)
-        if compile_proc.returncode != 0:
+        compile_result = container.exec_run(
+            ["bash", "-lc", language_config["compile"]],
+            workdir="/workspace",
+            demux=True,
+        )
+        compile_exit_code = compile_result.exit_code
+        stdout, stderr = compile_result.output
+        compile_stdout = (stdout or b"").decode("utf-8", errors="replace")
+        compile_stderr = (stderr or b"").decode("utf-8", errors="replace")
+
+        if compile_exit_code != 0:
             with SessionLocal() as session:
                 update_submission(
                     session,
@@ -126,37 +132,28 @@ def judge_submission(submission_id: int) -> None:
                     status="finished",
                     verdict="Compile Error",
                     detail="Compilation failed",
-                    compile_output=(compile_proc.stderr or compile_proc.stdout)[-8000:],
+                    compile_output=(compile_stderr or compile_stdout)[-8000:],
                 )
             return
 
         for case in PROBLEM["tests"]:
-            input_path = temp_path / "input.txt"
-            input_path.write_text(case["input"], encoding="utf-8")
+            input_tar_bytes = create_tar_with_file("input.txt", case["input"])
+            container.put_archive("/workspace", input_tar_bytes)
+
             start = time.perf_counter()
-            run_cmd = [
-                "docker",
-                "run",
-                "--rm",
-                "--network",
-                "none",
-                "--cpus",
-                "1",
-                "--memory",
-                "256m",
-                "--pids-limit",
-                "64",
-                "-v",
-                f"{temp_dir}:/workspace",
-                SANDBOX_IMAGE,
-                "bash",
-                "-lc",
-                f"timeout 2s {language_config['run']} < /workspace/input.txt",
-            ]
-            run_proc = subprocess.run(run_cmd, capture_output=True, text=True)
+            run_result = container.exec_run(
+                ["bash", "-lc", f"timeout 2s {language_config['run']} < /workspace/input.txt"],
+                workdir="/workspace",
+                demux=True,
+            )
             elapsed_ms = int((time.perf_counter() - start) * 1000)
 
-            if run_proc.returncode == 124:
+            run_exit_code = run_result.exit_code
+            stdout, stderr = run_result.output
+            run_stdout = (stdout or b"").decode("utf-8", errors="replace")
+            run_stderr = (stderr or b"").decode("utf-8", errors="replace")
+
+            if run_exit_code == 124:
                 with SessionLocal() as session:
                     update_submission(
                         session,
@@ -164,13 +161,13 @@ def judge_submission(submission_id: int) -> None:
                         status="finished",
                         verdict="Time Limit Exceeded",
                         detail="Program exceeded 2 seconds",
-                        program_output=run_proc.stdout[-8000:],
+                        program_output=run_stdout[-8000:],
                         expected_output=case["output"],
                         time_ms=elapsed_ms,
                     )
                 return
 
-            if run_proc.returncode != 0:
+            if run_exit_code != 0:
                 with SessionLocal() as session:
                     update_submission(
                         session,
@@ -178,16 +175,15 @@ def judge_submission(submission_id: int) -> None:
                         status="finished",
                         verdict="Runtime Error",
                         detail=(
-                            run_proc.stderr or "Program exited with non-zero status"
+                            run_stderr or "Program exited with non-zero status"
                         )[-8000:],
-                        program_output=run_proc.stdout[-8000:],
+                        program_output=run_stdout[-8000:],
                         expected_output=case["output"],
                         time_ms=elapsed_ms,
                     )
                 return
 
-            actual = run_proc.stdout
-            if actual != case["output"]:
+            if run_stdout != case["output"]:
                 with SessionLocal() as session:
                     update_submission(
                         session,
@@ -195,7 +191,7 @@ def judge_submission(submission_id: int) -> None:
                         status="finished",
                         verdict="Wrong Answer",
                         detail="Output does not match expected output",
-                        program_output=actual[-8000:],
+                        program_output=run_stdout[-8000:],
                         expected_output=case["output"],
                         time_ms=elapsed_ms,
                     )
@@ -213,7 +209,8 @@ def judge_submission(submission_id: int) -> None:
                 time_ms=elapsed_ms,
                 memory_kb=None,
             )
-
+    finally:
+        container.remove(force=True)
 
 def main() -> None:
     while True:
