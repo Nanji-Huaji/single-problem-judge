@@ -76,24 +76,34 @@ with col1:
 with col2:
     st.caption("最近 50 次提交")
 
-submissions = fetch_submissions()
-st.dataframe(
-    [
-        {
-            "ID": item["id"],
-            "用户": item["username"],
-            "语言": item["language"],
-            "状态": item["status"],
-            "运行结果": item["verdict"],
-            "耗时(ms)": item["time_ms"],
-            "提交时间": item["created_at"],
-            "详情": item["detail"],
-        }
-        for item in submissions
-    ],
-    use_container_width=True,
-)
+def render_table():
+    submissions = fetch_submissions()
+    st.dataframe(
+        [
+            {
+                "ID": item["id"],
+                "用户": item["username"],
+                "语言": item["language"],
+                "状态": item["status"],
+                "运行结果": item["verdict"],
+                "耗时(ms)": item["time_ms"],
+                "提交时间": item["created_at"],
+                "详情": item["detail"],
+            }
+            for item in submissions
+        ],
+        use_container_width=True,
+    )
 
+if auto_refresh:
+    @st.fragment(run_every=5)
+    def auto_render_table():
+        render_table()
+    auto_render_table()
+else:
+    render_table()
+
+st.divider()
 selected_id = st.number_input("查看提交 ID", min_value=1, step=1, value=1)
 if st.button("加载提交详情"):
     response = requests.get(f"{API_BASE_URL}/submissions/{selected_id}", timeout=5)
@@ -102,7 +112,3 @@ if st.button("加载提交详情"):
         st.write(item)
     else:
         st.error("未找到该提交")
-
-if auto_refresh:
-    time.sleep(5)
-    st.rerun()
