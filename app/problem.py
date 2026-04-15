@@ -63,7 +63,7 @@ D
 """,
     "time_limit_ms": 2000,
     "memory_limit_mb": 128,
-    "supported_languages": ["c", "cpp17"],
+    "supported_languages": ["c", "cpp17", "python3"],
     "tests": [
         {"n": 1, "seed": 101},
         {"n": 2, "seed": 102},
