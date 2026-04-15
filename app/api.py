@@ -22,6 +22,13 @@ redis_client = Redis.from_url(REDIS_URL, decode_responses=True)
 @app.on_event("startup")
 def startup() -> None:
     Base.metadata.create_all(bind=engine)
+    # Ensure score column exists
+    from sqlalchemy import text
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE submissions ADD COLUMN score INTEGER"))
+    except Exception:
+        pass
 
 
 @app.get("/health")
