@@ -1,0 +1,53 @@
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+  api:
+    build:
+      context: .
+      dockerfile: app/Dockerfile.api
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: sqlite:////data/judge.db
+      REDIS_URL: redis://redis:6379/0
+      JUDGE_QUEUE: submissions
+    volumes:
+      - ./data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - redis
+    ports:
+      - "8000:8000"
+
+  ui:
+    build:
+      context: .
+      dockerfile: app/Dockerfile.ui
+    restart: unless-stopped
+    environment:
+      API_BASE_URL: http://api:8000
+    depends_on:
+      - api
+    ports:
+      - "8501:8501"
+
+  worker:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: sqlite:////data/judge.db
+      REDIS_URL: redis://redis:6379/0
+      JUDGE_QUEUE: submissions
+      SANDBOX_IMAGE: sandbox-runner:latest
+    volumes:
+      - ./data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./sandbox:/sandbox-src:ro
+    depends_on:
+      - redis
+      - api

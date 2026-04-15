@@ -1,0 +1,10 @@
+FROM python:3.12-slim
+
+WORKDIR /srv
+
+COPY app/requirements-ui.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
+
+COPY app /srv/app
+
+CMD ["streamlit", "run", "/srv/app/ui.py", "--server.address=0.0.0.0", "--server.port=8501"]
