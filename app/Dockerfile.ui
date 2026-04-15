@@ -7,4 +7,5 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
 COPY app /srv/app
 
-CMD ["streamlit", "run", "/srv/app/ui.py", "--server.address=0.0.0.0", "--server.port=8501"]
+ENV PYTHONPATH=/srv
+CMD ["streamlit", "run", "app/ui.py", "--server.address=0.0.0.0", "--server.port=8501"]
